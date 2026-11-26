@@ -55,8 +55,12 @@ Future<void> atender(HttpRequest requisicao) async {
     }
 
     final colecao = partes.length == 1;
-    final permitido = (colecao && (metodo == 'GET' || metodo == 'POST')) ||
-        (!colecao && (metodo == 'PUT' || metodo == 'DELETE'));
+    final permitido =
+    (colecao && (metodo == 'GET' || metodo == 'POST')) ||
+    (!colecao &&
+        (metodo == 'GET' ||
+         metodo == 'PUT' ||
+         metodo == 'DELETE'));
     if (!permitido) {
       await responder(requisicao.response, 405, {'erro': 'Metodo nao permitido.'});
       return;
@@ -84,23 +88,25 @@ Future<void> atender(HttpRequest requisicao) async {
 
     conexao = await abrirConexao();
 
-    if (metodo == 'GET') {
-      final resultado = await conexao.execute(
-        'SELECT `idCarro`, `marcaCarro`, `placaCarro`, `proprietarioCarro` '
-        'FROM `tabelaCadastroCarros` ORDER BY `idCarro`',
-      );
-      final carros = resultado.rows.map((linha) {
-        final dados = linha.assoc();
-        return {
-          'idCarro': int.tryParse(dados['idCarro'] ?? '') ?? dados['idCarro'],
-          'marcaCarro': dados['marcaCarro'],
-          'placaCarro': dados['placaCarro'],
-          'proprietarioCarro': dados['proprietarioCarro'],
-        };
-      }).toList();
-      await responder(requisicao.response, 200, carros);
-      return;
-    }
+if (metodo == 'GET') {
+  final resultado = await conexao.execute(
+    'SELECT `idCarro`, `marcaCarro`, `placaCarro`, '
+    '`proprietarioCarro` '
+    'FROM `tabelaCadastroCarros` WHERE `idCarro` = :id',
+    {'id': id},
+  );
+
+  final dados = resultado.rows.first.assoc();
+
+  await responder(requisicao.response, 200, {
+    'idCarro': int.tryParse(dados['idCarro'] ?? '') ??
+        dados['idCarro'],
+    'marcaCarro': dados['marcaCarro'],
+    'placaCarro': dados['placaCarro'],
+    'proprietarioCarro': dados['proprietarioCarro'],
+  });
+  return;
+}
 
     if (metodo == 'POST') {
       await conexao.execute(
@@ -155,22 +161,207 @@ Future<void> atender(HttpRequest requisicao) async {
       await responder(requisicao.response, 200, {'mensagem': 'Carro excluido.'});
       return;
     }
-  } on FormatException {
-    await responder(requisicao.response, 400, {'erro': 'JSON invalido.'});
-  } catch (erro) {
-    stderr.writeln('Erro na API: $erro');
-    await responder(requisicao.response, 500, {
-      'erro': 'Erro interno no servidor ou no banco de dados.'
-    });
-  } finally {
-    await conexao?.close();
-  }
+ 
+} on FormatException {
+  await responder(
+    requisicao.response,
+    400,
+    {'erro': 'JSON invalido.'},
+  );
+} catch (erro) {
+  stderr.writeln('Erro na API: $erro');
+
+  await responder(
+    requisicao.response,
+    500,
+    {'erro': 'Erro interno no servidor ou no banco de dados.'},
+  );
+}
 }
 
+//novas rotas
+//cadastro cliente
+Future<Map<String, String>?> lerCliente(HttpRequest requisicao) async {
+  final texto = await utf8.decoder.bind(requisicao).join();
+  final dados = jsonDecode(texto);
+  if (dados is! Map ||
+      dados['nomeCliente'] is! String ||
+      dados['contatoCliente'] is! String) {
+    return null;
+  }
+  final cliente = (dados['nomeCliente'] as String).trim();
+  final contato = (dados['contatoCliente'] as String).trim();
+  if (cliente.isEmpty || contato.isEmpty)return null;
+  return {
+    'nomeCliente': cliente,
+    'contatoCliente': contato,
+      };
+}
+
+Future<void> atenderClientes(HttpRequest requisicao) async {
+  final metodo = requisicao.method;
+  final partes = requisicao.uri.pathSegments;
+  MySQLConnection? conexao;
+
+  try {
+    if (partes.isEmpty || partes.first != 'cliente' || partes.length > 2) {
+      await responder(requisicao.response, 404, {'erro': 'Rota nao encontrada.'});
+      return;
+    }
+
+    final colecao = partes.length == 1;
+    final permitido =
+    (colecao && (metodo == 'GET' || metodo == 'POST')) ||
+    (!colecao &&
+        (metodo == 'GET' ||
+         metodo == 'PUT' ||
+         metodo == 'DELETE'));
+    if (!permitido) {
+      await responder(requisicao.response, 405, {'erro': 'Metodo nao permitido.'});
+      return;
+    }
+
+    int? id;
+    if (!colecao) {
+      id = int.tryParse(partes[1]);
+      if (id == null || id <= 0) {
+        await responder(requisicao.response, 400, {'erro': 'ID invalido.'});
+        return;
+      }
+    }
+
+    Map<String, String>? cliente;
+    if (metodo == 'POST' || metodo == 'PUT') {
+      cliente = await lerCliente(requisicao);
+      if (cliente == null) {
+        await responder(requisicao.response, 400, {
+          'erro': 'Informe nomeCliente e contatoCliente.'
+        });
+        return;
+      }
+    }
+
+    conexao = await abrirConexao();
+
+if (metodo == 'GET') {
+  final resultado = await conexao.execute(
+    'SELECT `idCliente`, `nomeCliente`, `contatoCliente` '
+    'FROM `tabelaCadastroCliente` WHERE `idCliente` = :id',
+    {'id': id},
+  );
+
+  final dados = resultado.rows.first.assoc();
+
+  await responder(requisicao.response, 200, {
+    'idCliente': int.tryParse(dados['idCliente'] ?? '') ??
+        dados['idCliente'],
+    'nomeCliente': dados['nomeCliente'],
+    'contatoCliente': dados['contatoCliente'],
+  });
+  return;
+}
+
+    if (metodo == 'POST') {
+      await conexao.execute(
+        'INSERT INTO `tabelaCadastroCliente` '
+        '(`nomeCliente`, `contatoCliente`) '
+        'VALUES (:nome, :contato)',
+        {
+          'nome': cliente!['nomeCliente'],
+          'contato': cliente['contatoCliente'],
+        },
+      );
+      final resultadoId = await conexao.execute('SELECT LAST_INSERT_ID() AS id');
+      final novoId = int.tryParse(resultadoId.rows.first.colByName('id') ?? '');
+      await responder(requisicao.response, 201, {'idCliente': novoId, ...cliente});
+      return;
+    }
+
+    // Confere se o cliente existe antes de alterar ou excluir.
+    final existente = await conexao.execute(
+      'SELECT `idCliente` FROM `tabelaCadastroCliente` WHERE `idCliente` = :id',
+      {'id': id},
+    );
+    if (existente.rows.isEmpty) {
+      await responder(requisicao.response, 404, {'erro': 'Cliente nao encontrado.'});
+      return;
+    }
+
+    if (metodo == 'PUT') {
+      await conexao.execute(
+        'UPDATE `tabelaCadastroCliente` SET '
+        '`nomeCliente` = :nome, `contatoCliente` = :contato WHERE `idCliente` = :id',
+        {
+          'nome': cliente!['nomeCliente'],
+          'contato': cliente['contatoCliente'],
+       'id': id,
+        },
+      );
+      await responder(requisicao.response, 200, {
+        'mensagem': 'Cliente atualizado.', 'idCliente': id, ...cliente,
+      });
+      return;
+    }
+
+    if (metodo == 'DELETE') {
+      await conexao.execute(
+        'DELETE FROM `tabelaCadastroCliente` WHERE `idCliente` = :id',
+        {'id': id},
+      );
+      await responder(requisicao.response, 200, {'mensagem': 'Cliente excluido.'});
+      return;
+    }
+
+} on FormatException {
+  await responder(
+    requisicao.response,
+    400,
+    {'erro': 'JSON invalido.'},
+  );
+} catch (erro) {
+  stderr.writeln('Erro na API: $erro');
+
+  await responder(
+    requisicao.response,
+    500,
+    {'erro': 'Erro interno no servidor ou no banco de dados.'},
+  );
+}
+}
+
+
 Future<void> main() async {
-  final servidor = await HttpServer.bind(InternetAddress.loopbackIPv4, 8080);
-  print('API OficinaGeral em http://localhost:8080/carros');
+  // Inicia o servidor na porta 8080
+  final servidor = await HttpServer.bind(
+    InternetAddress.loopbackIPv4,
+    8080,
+  );
+
+  print('API OficinaGeral em http://localhost:8080');
+
+  // Aguarda as requisicoes HTTP
   await for (final requisicao in servidor) {
-    atender(requisicao);
+
+    // Identifica os segmentos da URL
+    final partes = requisicao.uri.pathSegments;
+
+    // ROTA DE CARROS
+    if (partes.isNotEmpty && partes.first == 'carros') {
+      await atender(requisicao);
+    }
+
+    // ROTA DE CLIENTES
+    else if (partes.isNotEmpty && partes.first == 'cliente') {
+      await atenderClientes(requisicao);
+    }
+
+    // ROTA NAO ENCONTRADA
+    else {
+      await responder(
+        requisicao.response,
+        404,
+        {'erro': 'Rota nao encontrada.'},
+      );
+    }
   }
 }
